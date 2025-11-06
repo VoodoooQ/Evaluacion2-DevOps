@@ -17,12 +17,6 @@ services:
       - SPRING_DATASOURCE_PASSWORD=
       - SPRING_JPA_HIBERNATE_DDL_AUTO=update
       - SPRING_H2_CONSOLE_ENABLED=true
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/students"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
     networks:
       - app-network
     restart: unless-stopped
@@ -44,8 +38,7 @@ services:
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
-      springboot-app:
-        condition: service_healthy
+      - springboot-app
     networks:
       - app-network
     restart: unless-stopped

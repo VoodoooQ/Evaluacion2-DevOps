@@ -144,6 +144,8 @@ jobs:
                 - "8080:8080"
               environment:
                 - SPRING_PROFILES_ACTIVE=staging
+                - SPRING_DATASOURCE_URL=jdbc:h2:mem:testdb
+                - SPRING_H2_CONSOLE_ENABLED=true
               restart: unless-stopped
           EOF
           echo "Docker Compose file created:"
@@ -156,8 +158,8 @@ jobs:
 
       - name: Esperar a que la aplicación inicie
         run: |
-          echo "Esperando 45 segundos para que la aplicación inicie..."
-          sleep 45
+          echo "Esperando 60 segundos para que Spring Boot inicie completamente..."
+          sleep 60
 
       - name: Verificar estado del deployment
         run: |
@@ -165,11 +167,23 @@ jobs:
           docker compose -f docker-compose.staging.yml ps
           
           echo ""
-          echo "=== Verificando que el contenedor está Up ==="
-          if docker compose -f docker-compose.staging.yml ps | grep -E "Up|running"; then
-            echo "✅ Contenedor está corriendo"
+          echo "=== Verificando que el contenedor está corriendo ==="
+          # Usar docker inspect para verificar estado de forma robusta
+          CONTAINER_ID=$(docker compose -f docker-compose.staging.yml ps -q app)
+          
+          if [ -z "$CONTAINER_ID" ]; then
+            echo "❌ No se encontró el contenedor"
+            docker compose -f docker-compose.staging.yml logs
+            exit 1
+          fi
+          
+          CONTAINER_STATE=$(docker inspect --format='{{.State.Status}}' $CONTAINER_ID)
+          echo "Estado del contenedor: $CONTAINER_STATE"
+          
+          if [ "$CONTAINER_STATE" = "running" ]; then
+            echo "✅ Contenedor está corriendo correctamente"
           else
-            echo "❌ Contenedor no está corriendo correctamente"
+            echo "❌ Contenedor no está en estado 'running'"
             docker compose -f docker-compose.staging.yml logs
             exit 1
           fi
@@ -178,39 +192,53 @@ jobs:
         run: |
           echo "Ejecutando smoke tests..."
           
-          # Test 1: Verificar puerto
-          if docker ps | grep "0.0.0.0:8080"; then
-            echo "✅ Puerto 8080 está mapeado"
+          CONTAINER_ID=$(docker compose -f docker-compose.staging.yml ps -q app)
+          
+          # Test 1: Verificar que el puerto 8080 está mapeado
+          echo "Test 1: Verificando mapeo de puerto..."
+          if docker ps --format '{{.Ports}}' | grep "8080"; then
+            echo "✅ Puerto 8080 está mapeado correctamente"
           else
             echo "❌ Puerto 8080 no está mapeado"
+            docker ps
             exit 1
           fi
           
-          # Test 2: Verificar endpoint desde dentro del contenedor
-          echo "Verificando endpoint /students..."
-          CONTAINER_ID=$(docker compose -f docker-compose.staging.yml ps -q app)
-          
-          max_attempts=6
+          # Test 2: Verificar endpoint /students con reintentos
+          echo ""
+          echo "Test 2: Verificando endpoint /students..."
+          max_attempts=10
           attempt=1
           success=false
           
           while [ $attempt -le $max_attempts ]; do
-            echo "Intento $attempt de $max_attempts..."
+            echo "  Intento $attempt de $max_attempts..."
             
-            if docker exec $CONTAINER_ID sh -c "wget -O- --timeout=5 http://localhost:8080/students" 2>/dev/null | grep -q "students"; then
+            # Usar wget dentro del contenedor (Alpine tiene wget por defecto)
+            if docker exec $CONTAINER_ID sh -c "wget -q -O- --timeout=5 http://localhost:8080/students 2>/dev/null" | grep -q '\['; then
               echo "✅ Endpoint /students responde correctamente"
               success=true
               break
             fi
             
-            if [ $attempt -eq $max_attempts ]; then
-              echo "⚠️ Endpoint no respondió después de $max_attempts intentos"
-              echo "Continuando... (la aplicación puede estar iniciando)"
+            if [ $attempt -lt $max_attempts ]; then
+              echo "  Esperando 8 segundos antes del siguiente intento..."
+              sleep 8
             fi
             
             attempt=$((attempt + 1))
-            sleep 10
           done
+          
+          if [ "$success" = false ]; then
+            echo ""
+            echo "❌ El endpoint /students no respondió después de $max_attempts intentos"
+            echo "Mostrando logs de la aplicación:"
+            docker compose -f docker-compose.staging.yml logs --tail=100
+            exit 1
+          fi
+          
+          echo ""
+          echo "✅ Todos los smoke tests pasaron exitosamente"
 
       - name: Mostrar información del deployment
         if: always()
