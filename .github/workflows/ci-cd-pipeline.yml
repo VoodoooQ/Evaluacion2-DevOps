@@ -151,7 +151,7 @@ jobs:
 
       - name: Desplegar con Docker Compose
         run: |
-          docker-compose -f docker-compose.staging.yml up -d
+          docker compose -f docker-compose.staging.yml up -d
           echo "✅ Aplicación desplegada con Docker Compose"
 
       - name: Esperar a que la aplicación inicie
@@ -162,15 +162,15 @@ jobs:
       - name: Verificar estado del deployment
         run: |
           echo "=== Estado de los servicios ==="
-          docker-compose -f docker-compose.staging.yml ps
+          docker compose -f docker-compose.staging.yml ps
           
           echo ""
           echo "=== Verificando que el contenedor está Up ==="
-          if docker-compose -f docker-compose.staging.yml ps | grep -E "Up|running"; then
+          if docker compose -f docker-compose.staging.yml ps | grep -E "Up|running"; then
             echo "✅ Contenedor está corriendo"
           else
             echo "❌ Contenedor no está corriendo correctamente"
-            docker-compose -f docker-compose.staging.yml logs
+            docker compose -f docker-compose.staging.yml logs
             exit 1
           fi
 
@@ -188,7 +188,7 @@ jobs:
           
           # Test 2: Verificar endpoint desde dentro del contenedor
           echo "Verificando endpoint /students..."
-          CONTAINER_ID=$(docker-compose -f docker-compose.staging.yml ps -q app)
+          CONTAINER_ID=$(docker compose -f docker-compose.staging.yml ps -q app)
           
           max_attempts=6
           attempt=1
@@ -216,17 +216,17 @@ jobs:
         if: always()
         run: |
           echo "=== Servicios Docker Compose ==="
-          docker-compose -f docker-compose.staging.yml ps
+          docker compose -f docker-compose.staging.yml ps
           
           echo ""
           echo "=== Logs de la aplicación ==="
-          docker-compose -f docker-compose.staging.yml logs --tail=50
+          docker compose -f docker-compose.staging.yml logs --tail=50
 
       - name: Limpiar entorno staging
         if: always()
         run: |
           echo "Deteniendo servicios de Docker Compose..."
-          docker-compose -f docker-compose.staging.yml down
+          docker compose -f docker-compose.staging.yml down
           echo "✅ Entorno staging limpiado"
 
   # Job 5: Notificaciones (IE3 - alertas)
