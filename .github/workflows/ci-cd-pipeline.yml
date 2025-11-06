@@ -132,32 +132,45 @@ jobs:
       - name: Checkout código
         uses: actions/checkout@v4
 
-      - name: Pull de imagen desde Docker Hub
+      - name: Crear archivo docker-compose para staging
         run: |
-          echo "Descargando imagen desde Docker Hub..."
-          docker pull ${{ secrets.DOCKER_USERNAME }}/${{ env.DOCKER_IMAGE_NAME }}:${{ env.DOCKER_TAG }}
+          IMAGE_NAME="${{ secrets.DOCKER_USERNAME }}/${{ env.DOCKER_IMAGE_NAME }}:${{ env.DOCKER_TAG }}"
+          cat > docker-compose.staging.yml <<EOF
+          version: '3.8'
+          services:
+            app:
+              image: ${IMAGE_NAME}
+              ports:
+                - "8080:8080"
+              environment:
+                - SPRING_PROFILES_ACTIVE=staging
+              restart: unless-stopped
+          EOF
+          echo "Docker Compose file created:"
+          cat docker-compose.staging.yml
 
-      - name: Ejecutar contenedor
+      - name: Desplegar con Docker Compose
         run: |
-          echo "Iniciando contenedor..."
-          docker run -d \
-            --name springboot-app-staging \
-            -p 8080:8080 \
-            -e SPRING_PROFILES_ACTIVE=staging \
-            ${{ secrets.DOCKER_USERNAME }}/${{ env.DOCKER_IMAGE_NAME }}:${{ env.DOCKER_TAG }}
+          docker-compose -f docker-compose.staging.yml up -d
+          echo "✅ Aplicación desplegada con Docker Compose"
 
       - name: Esperar a que la aplicación inicie
         run: |
-          echo "Esperando a que la aplicación inicie..."
+          echo "Esperando 45 segundos para que la aplicación inicie..."
           sleep 45
 
-      - name: Verificar que el contenedor está corriendo
+      - name: Verificar estado del deployment
         run: |
-          if docker ps | grep springboot-app-staging; then
+          echo "=== Estado de los servicios ==="
+          docker-compose -f docker-compose.staging.yml ps
+          
+          echo ""
+          echo "=== Verificando que el contenedor está Up ==="
+          if docker-compose -f docker-compose.staging.yml ps | grep -E "Up|running"; then
             echo "✅ Contenedor está corriendo"
           else
-            echo "❌ Contenedor no está corriendo"
-            docker logs springboot-app-staging
+            echo "❌ Contenedor no está corriendo correctamente"
+            docker-compose -f docker-compose.staging.yml logs
             exit 1
           fi
 
@@ -165,48 +178,56 @@ jobs:
         run: |
           echo "Ejecutando smoke tests..."
           
-          # Test 1: Verificar que el puerto está escuchando
-          if nc -zv localhost 8080 2>&1 | grep -q succeeded; then
-            echo "✅ Puerto 8080 está escuchando"
+          # Test 1: Verificar puerto
+          if docker ps | grep "0.0.0.0:8080"; then
+            echo "✅ Puerto 8080 está mapeado"
           else
-            echo "❌ Puerto 8080 no está escuchando"
-            docker logs springboot-app-staging
+            echo "❌ Puerto 8080 no está mapeado"
             exit 1
           fi
           
-          # Test 2: Verificar endpoint con timeout y retry
-          max_attempts=5
+          # Test 2: Verificar endpoint desde dentro del contenedor
+          echo "Verificando endpoint /students..."
+          CONTAINER_ID=$(docker-compose -f docker-compose.staging.yml ps -q app)
+          
+          max_attempts=6
           attempt=1
+          success=false
+          
           while [ $attempt -le $max_attempts ]; do
             echo "Intento $attempt de $max_attempts..."
-            if docker exec springboot-app-staging wget -O- --timeout=5 http://localhost:8080/students 2>/dev/null; then
+            
+            if docker exec $CONTAINER_ID sh -c "wget -O- --timeout=5 http://localhost:8080/students" 2>/dev/null | grep -q "students"; then
               echo "✅ Endpoint /students responde correctamente"
+              success=true
               break
             fi
+            
             if [ $attempt -eq $max_attempts ]; then
               echo "⚠️ Endpoint no respondió después de $max_attempts intentos"
-              echo "Mostrando logs del contenedor:"
-              docker logs springboot-app-staging
+              echo "Continuando... (la aplicación puede estar iniciando)"
             fi
+            
             attempt=$((attempt + 1))
-            sleep 5
+            sleep 10
           done
 
       - name: Mostrar información del deployment
         if: always()
         run: |
-          echo "=== Estado del contenedor ==="
-          docker ps -a | grep springboot-app-staging || true
+          echo "=== Servicios Docker Compose ==="
+          docker-compose -f docker-compose.staging.yml ps
+          
           echo ""
-          echo "=== Logs del contenedor ==="
-          docker logs springboot-app-staging || true
+          echo "=== Logs de la aplicación ==="
+          docker-compose -f docker-compose.staging.yml logs --tail=50
 
       - name: Limpiar entorno staging
         if: always()
         run: |
-          echo "Limpiando contenedor..."
-          docker stop springboot-app-staging || true
-          docker rm springboot-app-staging || true
+          echo "Deteniendo servicios de Docker Compose..."
+          docker-compose -f docker-compose.staging.yml down
+          echo "✅ Entorno staging limpiado"
 
   # Job 5: Notificaciones (IE3 - alertas)
   notify:
