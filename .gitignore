@@ -1,0 +1,59 @@
+HELP.md
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+### STS ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+
+### IntelliJ IDEA ###
+.idea
+*.iws
+*.iml
+*.ipr
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+build/
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+### VS Code ###
+.vscode/
+
+### Documentación generada ###
+ANALISIS-CUMPLIMIENTO.md
+GUIA-CONFIGURACION.md
+
+### Docker ###
+*.log
+docker-compose.staging.yml
+
+### Sistema Operativo ###
+.DS_Store
+Thumbs.db
+
+### Oracle Wallet (credenciales sensibles) ###
+Wallet_*/
+*.sso
+*.p12
+*.pem
+*.jks
+
+### Variables de entorno ###
+.env
+.env.local
+
+### Maven ###
+dependency-reduced-pom.xml

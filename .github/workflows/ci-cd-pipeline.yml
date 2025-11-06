@@ -1,0 +1,207 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  DOCKER_IMAGE_NAME: springboot-app
+  DOCKER_TAG: ${{ github.sha }}
+
+jobs:
+  # Job 1: Ejecución de pruebas unitarias (IE2)
+  test:
+    name: Pruebas Unitarias
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Configurar JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Ejecutar pruebas unitarias con Maven
+        run: mvn clean test
+
+      - name: Generar reporte de cobertura
+        run: mvn jacoco:report
+
+      - name: Subir reporte de pruebas
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: target/surefire-reports/
+
+      - name: Subir reporte de cobertura
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: target/site/jacoco/
+
+  # Job 2: Análisis de seguridad con Snyk (IE3)
+  security-analysis:
+    name: Análisis de Seguridad
+    runs-on: ubuntu-latest
+    needs: test
+    
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Configurar JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
+
+      # Escaneo de dependencias con Snyk (IE3)
+      - name: Escaneo de vulnerabilidades con Snyk
+        uses: snyk/actions/maven@master
+        continue-on-error: false  # Bloquea si encuentra vulnerabilidades críticas
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=high
+
+      - name: Subir reporte de Snyk
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: snyk-security-report
+          path: snyk-report.json
+
+  # Job 3: Construcción de imagen Docker (IE1)
+  build-docker:
+    name: Construcción de Imagen Docker
+    runs-on: ubuntu-latest
+    needs: [test, security-analysis]
+    
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Configurar Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login a Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Construir imagen Docker
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/${{ env.DOCKER_IMAGE_NAME }}:${{ env.DOCKER_TAG }}
+            ${{ secrets.DOCKER_USERNAME }}/${{ env.DOCKER_IMAGE_NAME }}:latest
+          cache-from: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/${{ env.DOCKER_IMAGE_NAME }}:buildcache
+          cache-to: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/${{ env.DOCKER_IMAGE_NAME }}:buildcache,mode=max
+
+  # Job 4: Despliegue en entorno simulado (IE4)
+  deploy-staging:
+    name: Despliegue en Staging
+    runs-on: ubuntu-latest
+    needs: build-docker
+    environment:
+      name: staging
+      url: http://localhost:8080
+    
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Crear archivo docker-compose para staging
+        run: |
+          cat > docker-compose.staging.yml <<EOF
+          version: '3.8'
+          services:
+            app:
+              image: ${{ secrets.DOCKER_USERNAME }}/${{ env.DOCKER_IMAGE_NAME }}:${{ env.DOCKER_TAG }}
+              ports:
+                - "8080:8080"
+              environment:
+                - SPRING_PROFILES_ACTIVE=staging
+              healthcheck:
+                test: ["CMD", "curl", "-f", "http://localhost:8080/students"]
+                interval: 30s
+                timeout: 10s
+                retries: 3
+                start_period: 40s
+          EOF
+
+      - name: Desplegar con Docker Compose
+        run: |
+          docker-compose -f docker-compose.staging.yml up -d
+
+      - name: Esperar a que la aplicación esté lista
+        run: |
+          echo "Esperando a que la aplicación inicie..."
+          timeout 60 bash -c 'until curl -f http://localhost:8080/students; do sleep 5; done'
+
+      - name: Ejecutar pruebas de humo (smoke tests)
+        run: |
+          echo "Ejecutando pruebas básicas..."
+          response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/students)
+          if [ $response -eq 200 ]; then
+            echo "✅ Aplicación desplegada correctamente"
+          else
+            echo "❌ Error en el despliegue"
+            exit 1
+          fi
+
+      - name: Verificar consola H2
+        run: |
+          response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/h2-console/)
+          if [ $response -eq 200 ]; then
+            echo "✅ Consola H2 accesible"
+          else
+            echo "⚠️ Consola H2 no accesible"
+          fi
+
+      - name: Mostrar logs de la aplicación
+        if: always()
+        run: |
+          docker-compose -f docker-compose.staging.yml logs
+
+      - name: Limpiar entorno staging
+        if: always()
+        run: |
+          docker-compose -f docker-compose.staging.yml down
+
+  # Job 5: Notificaciones (IE3 - alertas)
+  notify:
+    name: Notificaciones
+    runs-on: ubuntu-latest
+    needs: [test, security-analysis, build-docker, deploy-staging]
+    if: always()
+    
+    steps:
+      - name: Notificación de éxito
+        if: ${{ needs.test.result == 'success' && needs.security-analysis.result == 'success' && needs.build-docker.result == 'success' && needs.deploy-staging.result == 'success' }}
+        run: |
+          echo "✅ Pipeline completado exitosamente"
+          echo "Imagen: ${{ secrets.DOCKER_USERNAME }}/${{ env.DOCKER_IMAGE_NAME }}:${{ env.DOCKER_TAG }}"
+
+      - name: Notificación de fallo
+        if: ${{ needs.test.result == 'failure' || needs.security-analysis.result == 'failure' || needs.build-docker.result == 'failure' || needs.deploy-staging.result == 'failure' }}
+        run: |
+          echo "❌ Pipeline falló"
+          echo "Test: ${{ needs.test.result }}"
+          echo "Security: ${{ needs.security-analysis.result }}"
+          echo "Build: ${{ needs.build-docker.result }}"
+          echo "Deploy: ${{ needs.deploy-staging.result }}"
+          exit 1
