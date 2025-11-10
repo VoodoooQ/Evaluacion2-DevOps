@@ -64,22 +64,19 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
-      # Escaneo de dependencias con Snyk (IE3)
+      # Escaneo de dependencias con Snyk - BLOQUEANTE
       - name: Escaneo de vulnerabilidades con Snyk
         id: snyk-scan
-        uses: snyk/actions/maven@master
-        continue-on-error: true  # Permitir continuar para generar reporte
+        continue-on-error: true
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        with:
-          args: --severity-threshold=high --json-file-output=snyk-report.json
-      
-      - name: Verificar resultado de Snyk
-        if: steps.snyk-scan.outcome == 'failure'
         run: |
-          echo "⚠️ Snyk encontró vulnerabilidades. Revisa el reporte."
-          echo "El pipeline continuará para fines de demostración."
-
+          npm install -g snyk
+          snyk auth ${{ secrets.SNYK_TOKEN }}
+          snyk test --json > snyk-report.json || true
+          cat snyk-report.json
+      
+      # Subir reporte SIEMPRE (incluso si falla)
       - name: Subir reporte de Snyk
         if: always()
         uses: actions/upload-artifact@v4
@@ -87,6 +84,34 @@ jobs:
           name: snyk-security-report
           path: snyk-report.json
           if-no-files-found: warn
+      
+      # Verificar y BLOQUEAR si hay vulnerabilidades HIGH/CRITICAL
+      - name: Validar vulnerabilidades (QUALITY GATE)
+        run: |
+          echo "🔍 Analizando reporte de Snyk..."
+          
+          # Verificar si el archivo existe
+          if [ ! -f snyk-report.json ]; then
+            echo "⚠️ No se encontró snyk-report.json"
+            exit 1
+          fi
+          
+          # Extraer vulnerabilidades HIGH y CRITICAL
+          HIGH_VULNS=$(jq '[.vulnerabilities[] | select(.severity == "high")] | length' snyk-report.json 2>/dev/null || echo "0")
+          CRITICAL_VULNS=$(jq '[.vulnerabilities[] | select(.severity == "critical")] | length' snyk-report.json 2>/dev/null || echo "0")
+          
+          echo "📊 Vulnerabilidades encontradas:"
+          echo "   - CRITICAL: $CRITICAL_VULNS"
+          echo "   - HIGH: $HIGH_VULNS"
+          
+          # BLOQUEAR si hay vulnerabilidades graves
+          if [ "$CRITICAL_VULNS" -gt 0 ] || [ "$HIGH_VULNS" -gt 0 ]; then
+            echo "❌ PIPELINE BLOQUEADO: Se encontraron vulnerabilidades HIGH o CRITICAL"
+            echo "📄 Revisa el artifact 'snyk-security-report' para más detalles"
+            exit 1
+          fi
+          
+          echo "✅ No se encontraron vulnerabilidades HIGH o CRITICAL"
 
   # Job 3: Construcción de imagen Docker (IE1)
   build-docker:

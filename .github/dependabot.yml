@@ -1,4 +1,4 @@
-# Configuración de Dependabot para escaneo automático de dependencias (IE3)
+# Configuración de Dependabot para escaneo automático de dependencias
 version: 2
 updates:
   # Monitoreo de dependencias de Maven
@@ -8,26 +8,22 @@ updates:
       interval: "weekly"
       day: "monday"
       time: "09:00"
-    open-pull-requests-limit: 10
-    reviewers:
-      - "your-github-username"
+    open-pull-requests-limit: 5
     labels:
       - "dependencies"
       - "security"
-    # Configuración de seguridad
-    allow:
-      - dependency-type: "all"
-    # Agrupación de actualizaciones
-    groups:
-      spring-framework:
-        patterns:
-          - "org.springframework*"
-      testing:
-        patterns:
-          - "junit*"
-          - "mockito*"
-    # Actualizaciones de seguridad tienen prioridad
-    versioning-strategy: increase
+  
+  # Monitoreo del Dockerfile
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "docker"
 
   # Monitoreo de GitHub Actions
   - package-ecosystem: "github-actions"
