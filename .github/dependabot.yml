@@ -35,14 +35,3 @@ updates:
     labels:
       - "github-actions"
       - "dependencies"
-
-  # Monitoreo de Dockerfile
-  - package-ecosystem: "docker"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-    open-pull-requests-limit: 5
-    labels:
-      - "docker"
-      - "dependencies"
