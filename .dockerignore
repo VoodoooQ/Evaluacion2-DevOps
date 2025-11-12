@@ -1,0 +1,52 @@
+# Ignorar archivos de compilación y temporales
+target/
+!target/*.jar
+
+# Maven
+.mvn/
+mvnw
+mvnw.cmd
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.settings/
+.project
+.classpath
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+
+# Documentación
+*.md
+!README.md
+
+# GitHub
+.github/
+
+# Logs
+*.log
+
+# Variables de entorno
+.env
+.env.local
+
+# Oracle Wallet (credenciales sensibles)
+Wallet_*/
+*.sso
+*.p12
+*.pem
+*.jks
+
+# Archivos de configuración local
+nginx.conf
+docker-compose*.yml
+
+# Tests
+src/test/
